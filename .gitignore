@@ -1,0 +1,7 @@
+/file-share
+/chat-server
+/file-share
+*.exe
+/data/
+.DS_Store
+Thumbs.db
