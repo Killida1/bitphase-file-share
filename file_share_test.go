@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -987,6 +988,37 @@ func TestLinkShareRejectsNonPaidToken(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for a free-tier token, got %d", resp.StatusCode)
+	}
+}
+
+// TestLinkShareVPNPlanNeedsSecretOnly: the VPN-only plan (or trial) is
+// meant to include secret-sharing but not Drive's persistent file-share
+// (MONETIZATION.md pivot) — a Plan=="vpn" paid token must be accepted when
+// the request declares secret_only, and rejected when it doesn't (a client
+// pretending to be Drive can't ride the same relaxed gate).
+func TestLinkShareVPNPlanNeedsSecretOnly(t *testing.T) {
+	addr := startTestServer(t)
+	vpnToken := makeTokenWithPlan(t, testBrokerPriv, "paid", "vpn", time.Hour)
+
+	secretBody, _ := json.Marshal(linkStartRequest{Token: vpnToken, TotalChunks: 1, SecretOnly: true})
+	resp, err := http.Post("http://"+addr+"/link/start", "application/json", bytes.NewReader(secretBody))
+	if err != nil {
+		t.Fatalf("POST /link/start (secret_only): %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 for a vpn-plan token with secret_only, got %d: %s", resp.StatusCode, body)
+	}
+
+	driveBody, _ := json.Marshal(linkStartRequest{Token: vpnToken, TotalChunks: 1})
+	resp2, err := http.Post("http://"+addr+"/link/start", "application/json", bytes.NewReader(driveBody))
+	if err != nil {
+		t.Fatalf("POST /link/start (drive): %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for a vpn-plan token without secret_only, got %d", resp2.StatusCode)
 	}
 }
 

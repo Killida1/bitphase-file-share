@@ -36,7 +36,14 @@ var tierRank = map[string]int{"free": 0, "paid": 1}
 // "self-contained and self-verifying" design. minTier defaults to "paid"
 // (WHITEPAPER §9 — file-share is paid-tier only) but is settable to "free"
 // via -min-tier for testing before real payments are wired up.
-func verifyToken(brokerPub ed25519.PublicKey, token string, minTier string) (clientToken, error) {
+//
+// allowVPNPlan lets a specific caller admit "vpn"-plan tokens too — added
+// for the link-share surface's one-time secret sharing (MONETIZATION.md
+// pivot: the $1 VPN trial and the cheap VPN-only plan both mint a
+// Plan=="vpn" token, and secret-sharing is meant to be included there, not
+// gated behind the full suite). The identity-based chat/file-share path
+// (handleWS) always passes false — that one stays full-suite-only.
+func verifyToken(brokerPub ed25519.PublicKey, token string, minTier string, allowVPNPlan bool) (clientToken, error) {
 	payloadB64, sigB64, ok := strings.Cut(token, ".")
 	if !ok {
 		return clientToken{}, errors.New("malformed token: expected <payload>.<signature>")
@@ -59,12 +66,14 @@ func verifyToken(brokerPub ed25519.PublicKey, token string, minTier string) (cli
 	if tierRank[tok.Tier] < tierRank[minTier] {
 		return clientToken{}, errors.New("token tier " + tok.Tier + " is below the required " + minTier + " tier")
 	}
-	// File-share requires the "full" plan (MONETIZATION.md §5.2) — a
-	// "vpn"-plan paid token is legitimately paid but didn't buy chat/file-share.
-	// Empty is treated as "full": either a legacy token minted before Plan
+	// The identity-based chat/file-share path requires the "full" plan
+	// (MONETIZATION.md §5.2) — a "vpn"-plan paid token is legitimately paid
+	// but didn't buy chat/file-share. The link-share surface (secret
+	// sharing) opts in to also accepting "vpn" via allowVPNPlan. Empty is
+	// always treated as "full": either a legacy token minted before Plan
 	// existed, or Tier=="free" (already rejected above by the tier check
 	// whenever minTier is "paid", so Plan is moot for it either way).
-	if tok.Plan != "" && tok.Plan != "full" {
+	if tok.Plan != "" && tok.Plan != "full" && !(allowVPNPlan && tok.Plan == "vpn") {
 		return clientToken{}, errors.New("token plan " + tok.Plan + " does not include this service")
 	}
 	if time.Now().Unix() > tok.ExpiresAt {

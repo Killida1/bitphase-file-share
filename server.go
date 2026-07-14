@@ -107,7 +107,7 @@ func (fs *fileShareServer) authenticate(ws *wsConn) (string, clientToken, error)
 		_ = ws.WriteMessage(errMsg)
 		return "", clientToken{}, err
 	}
-	tok, err := verifyToken(brokerPub, hello.Token, fs.minTier)
+	tok, err := verifyToken(brokerPub, hello.Token, fs.minTier, false) // identity-based file-share: full-suite only
 	if err != nil {
 		errMsg, _ := json.Marshal(wsEnvelope{Type: "auth_error", Error: "access token rejected: " + err.Error()})
 		_ = ws.WriteMessage(errMsg)
@@ -317,6 +317,14 @@ type linkStartRequest struct {
 	// OneTime makes the share burn after its first complete download —
 	// see transferMeta.OneTime in store.go.
 	OneTime bool `json:"one_time"`
+	// SecretOnly is set by /secret (never by /drive) — it admits a
+	// Plan=="vpn" token here (MONETIZATION.md pivot: secret-sharing is
+	// included on the VPN-only plan/trial, unlike Drive's persistent
+	// file-share, which stays full-suite-only). Self-reported, like several
+	// other client-declared fields in this codebase — not a security
+	// boundary, since a link-share transfer costs the same either way; it
+	// only decides which tier's token this specific request accepts.
+	SecretOnly bool `json:"secret_only,omitempty"`
 }
 
 type linkStartResponse struct {
@@ -343,7 +351,7 @@ func (fs *fileShareServer) handleLinkStart(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "access token rejected: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	if _, err := verifyToken(brokerPub, req.Token, fs.minTier); err != nil {
+	if _, err := verifyToken(brokerPub, req.Token, fs.minTier, req.SecretOnly); err != nil {
 		http.Error(w, "access token rejected: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
